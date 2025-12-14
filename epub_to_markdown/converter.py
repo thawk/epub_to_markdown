@@ -3,6 +3,7 @@
 import os
 import re
 import argparse
+import logging
 from pathlib import Path
 from ebooklib import epub
 import ebooklib
@@ -28,7 +29,7 @@ def _process_chapter(chapter_link, soup, image_map):
         chapter_title_norm = chapter_link.title.strip().lower()
         heading_text_norm = first_heading.get_text().strip().lower()
         if chapter_title_norm in heading_text_norm or heading_text_norm in chapter_title_norm:
-            print(f"    [信息] 移除与章节标题 '{chapter_link.title}' 重复的 HTML 标题: '{first_heading.get_text().strip()}'")
+            logging.debug(f"移除与章节标题 '{chapter_link.title}' 重复的 HTML 标题: '{first_heading.get_text().strip()}'")
             first_heading.decompose()
     
     return soup
@@ -52,7 +53,7 @@ def _recursive_add_toc(toc_items, level, markdown_content, href_map, image_map, 
                 if item.title.strip().lower() != book_title.strip().lower():
                     heading = '#' * level
                     markdown_content.append(f"{heading} {item.title}\n")
-                    print(f"  - 正在处理 {level} 级章节: {item.title}")
+                    logging.info(f"  - 正在处理 {level} 级章节: {item.title}")
                 
                 html_content = doc_item.get_content()
                 soup = BeautifulSoup(html_content, 'html.parser')
@@ -64,7 +65,7 @@ def _recursive_add_toc(toc_items, level, markdown_content, href_map, image_map, 
                 md = h.handle(str(processed_soup))
                 markdown_content.append(md)
             else:
-                print(f"    [警告] 在目录中找到但在 EPUB 中找不到链接: {item.href}")
+                logging.warning(f"在目录中找到但在 EPUB 中找不到链接: {item.href}")
 
         elif isinstance(item, (list, tuple)):
             # 这是父节点，一个包含子章节的 Section
@@ -74,7 +75,7 @@ def _recursive_add_toc(toc_items, level, markdown_content, href_map, image_map, 
                 if section.title.strip().lower() != book_title.strip().lower():
                     heading = '#' * level
                     markdown_content.append(f"{heading} {section.title}\n")
-                    print(f"处理 {level} 级目录 Section: {section.title}")
+                    logging.info(f"处理 {level} 级目录 Section: {section.title}")
             
             # 递归处理子项目，级别+1
             _recursive_add_toc(sub_items, level + 1, markdown_content, href_map, image_map, book_title)
@@ -85,13 +86,13 @@ def convert_epub_to_markdown(epub_path: Path, output_dir: Path):
     将单个 EPUB 文件转换为一个包含图片和正确章节的 Markdown 文件。
     """
     if not epub_path.exists():
-        print(f"[错误] 文件不存在: {epub_path}")
+        logging.error(f"文件不存在: {epub_path}")
         return
 
     try:
         book = epub.read_epub(epub_path)
     except Exception as e:
-        print(f"[错误] 无法读取 EPUB 文件 '{epub_path.name}': {e}")
+        logging.error(f"无法读取 EPUB 文件 '{epub_path.name}': {e}", exc_info=True)
         return
 
     # 1. 获取书名并创建对应的输出文件夹
@@ -100,12 +101,12 @@ def convert_epub_to_markdown(epub_path: Path, output_dir: Path):
     except IndexError:
         title = epub_path.stem
 
-    safe_title = re.sub(r'[\\/*?:\":<>|]', "", title)
+    safe_title = re.sub(r'[\\/*?:":<>|]', "", title)
     book_output_dir = output_dir / safe_title
     images_dir = book_output_dir / 'images'
     images_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"开始转换书籍: {title}")
+    logging.info(f"开始转换书籍: {title}")
     
     # 2. 提取图片并建立路径映射
     image_map = {}
@@ -129,30 +130,38 @@ def convert_epub_to_markdown(epub_path: Path, output_dir: Path):
     with open(output_filename, 'w', encoding='utf-8') as f:
         f.write("\n".join(markdown_content))
     
-    print(f"书籍 '{title}' 已成功转换为 Markdown: {output_filename}\n")
+    logging.info(f"书籍 '{title}' 已成功转换为 Markdown: {output_filename}\n")
 
 
 def main():
     """主函数，用于命令行执行"""
-    parser = argparse.ArgumentParser(description="将一个或多个 EPUB 文件转换为结构良好、包含图片的 Markdown 文件。")
-    parser.add_argument("epub_files", type=str, nargs='+', help="一个或多个 EPUB 文件的路径。")
-    parser.add_argument("-o", "--output_dir", type=str, default="markdown_output", help="存放输出 Markdown 文件的根目录。")
+    parser = argparse.ArgumentParser(description="将一个或多个 EPUB 文件转换为结构良好、包含图片的 Markdown 文件。" )
+    parser.add_argument("epub_files", type=str, nargs='+', help="一个或多个 EPUB 文件的路径。" )
+    parser.add_argument("-o", "--output_dir", type=str, default="markdown_output", help="存放输出 Markdown 文件的根目录。" )
+    parser.add_argument("-v", "--verbose", action="store_true", help="开启详细（DEBUG）日志输出。" )
     
     args = parser.parse_args()
 
+    # 配置日志
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(levelname)s: %(message)s'
+    )
+
     output_path = Path(args.output_dir)
     output_path.mkdir(exist_ok=True)
-    print(f"输出目录: {output_path.resolve()}")
+    logging.info(f"输出目录: {output_path.resolve()}")
 
     epub_paths = [Path(f) for f in args.epub_files]
 
     if not epub_paths:
-        print("未提供任何 EPUB 文件。" )
+        logging.warning("未提供任何 EPUB 文件。" )
     else:
-        print(f"找到 {len(epub_paths)} 个文件，准备开始转换...")
+        logging.info(f"找到 {len(epub_paths)} 个文件，准备开始转换...")
         for epub_file in epub_paths:
             convert_epub_to_markdown(epub_file, output_path)
-        print("所有书籍转换完成！")
+        logging.info("所有书籍转换完成！")
 
 if __name__ == '__main__':
     main()
