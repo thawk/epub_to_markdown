@@ -14,3 +14,4 @@ requires-python = ">=3.8"
 
 [project.scripts]
 epub2md = "epub_to_markdown.converter:main"
+split-markdown = "epub_to_markdown.cli_split_markdown:main"
